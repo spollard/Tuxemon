@@ -2,6 +2,7 @@
 # Copyright (c) 2014-2026 William Edwards <shadowapex@gmail.com>, Benjamin Bean <superman2k5@gmail.com>
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pygame_menu.locals import ALIGN_CENTER, ALIGN_LEFT, POSITION_EAST
@@ -22,6 +23,27 @@ if TYPE_CHECKING:
     from tuxemon.base_client import BaseClient
     from tuxemon.entity.npc import NPC
     from tuxemon.platform.events import PlayerInput
+
+# Font and line-pitch scales tried for the description, largest first.
+DESCRIPTION_SCALES: tuple[float, ...] = (1.0, 0.9, 0.8, 0.7, 0.6, 0.5)
+
+
+def pick_description_scale(
+    height_at: Callable[[float], float],
+    room: float,
+    scales: Sequence[float] = DESCRIPTION_SCALES,
+) -> float:
+    """Return the first (largest) scale whose text height fits in ``room``.
+
+    ``height_at(scale)`` lays the text out at that scale and returns its
+    height. It is called for each scale in turn, stopping at the first that
+    fits; if none fits, the last (smallest) scale is the result, and it is the
+    last one ``height_at`` was called with.
+    """
+    for scale in scales:
+        if height_at(scale) <= room:
+            return scale
+    return scales[-1]
 
 
 class JournalInfoState(PygameMenuState):
@@ -260,21 +282,35 @@ class JournalInfoState(PygameMenuState):
         )
         desc_frame._relax = True
         desc_frame.translate(fxw(8), fxh(85))
-        lab9: Any = menu.add.label(
-            title=desc,
-            label_id="description",
-            font_size=self.font_type.biggest,
-            wordwrap=True,
-            leading=fxh(10),
-            align=ALIGN_LEFT,
-            padding=0,
-        )
+        # The evolution line sits at nominal y=128, so the description has
+        # fxh(128 - 85) of room. A long description is set in a smaller font
+        # and line pitch, step by step, until it fits; one that fits keeps the
+        # original size.
+        lab9: Any = None
 
-        # Pack the label into the frame so its wordwrap width is bounded by the
-        # frame instead of the full menu width. Starting at x=8 with a width of
-        # 243 nominal px, the text ends at x=251 -- 2px inside the background
-        # panel's right-hand border (which sits at x=253).
-        desc_frame.pack(lab9, align=ALIGN_LEFT)
+        def build(scale: float) -> float:
+            nonlocal lab9
+            if lab9 is not None:
+                desc_frame.unpack(lab9)
+                menu.remove_widget(lab9)
+            lab9 = menu.add.label(
+                title=desc,
+                label_id="description",
+                font_size=max(1, round(self.font_type.biggest * scale)),
+                wordwrap=True,
+                leading=fxh(10 * scale),
+                align=ALIGN_LEFT,
+                padding=0,
+            )
+            # Pack the label into the frame so its wordwrap width is bounded
+            # by the frame instead of the full menu width. Starting at x=8
+            # with a width of 243 nominal px, the text ends at x=251 -- 2px
+            # inside the background panel's right-hand border (x=253).
+            desc_frame.pack(lab9, align=ALIGN_LEFT)
+            return lab9.get_height()
+
+        # The last label built is the one that stays.
+        pick_description_scale(build, fxh(128 - 85))
 
         # evolution monsters
         slugs = [ele.monster_slug for ele in monster.evolutions]
